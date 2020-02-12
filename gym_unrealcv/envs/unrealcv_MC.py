@@ -33,7 +33,7 @@ class UnrealCvMC(gym.Env):
                  observation_type='Color',  # 'color', 'depth', 'rgbd', 'Gray'
                  reward_type='distance',  # distance
                  docker=False,
-                 resolution= (320, 240),  # (400, 300),(320, 240)
+                 resolution= (320, 240),
                  nav='Random',  # Random, Goal, Internal
                  ):
 
@@ -45,7 +45,7 @@ class UnrealCvMC(gym.Env):
         self.env_name = setting['env_name']
         self.cam_id = setting['cam_id']
         self.target_list = setting['targets']
-        self.discrete_actions = setting['discrete_actions_big']
+        self.discrete_actions = setting['discrete_actions']
         self.discrete_actions_player = setting['discrete_actions_player']
         self.continous_actions = setting['continous_actions']
         self.continous_actions_player = setting['continous_actions_player']
@@ -57,18 +57,21 @@ class UnrealCvMC(gym.Env):
         self.height = setting['height']
         self.pitch = setting['pitch']
         self.objects_env = setting['objects_list']
-        # self.reset_area = setting['reset_area_median'] # finetuning in big obs; training in v1
-        self.reset_area = setting['reset_area0']  # testing
-        self.cam_area = setting['cam_area0']
+        if setting.get('reset_area'):
+            self.reset_area = setting['reset_area']
+        if setting.get('cam_area'):
+            self.cam_area = setting['cam_area']
+
         self.test = False if 'MCMTRoom' in self.env_name else True
 
         if setting.get('goal_list'):
             self.goal_list = setting['goal_list']
-        self.camera_loc = setting['camera_loc'] # 02.11. evening 23.11, garden cam_loc_0
+        if setting.get('camera_loc'):
+            self.camera_loc = setting['camera_loc']
 
         self.background_list = setting['backgrounds']
         self.light_list = setting['lights']
-        self.target_num = setting['target_num']  # the number of the target appearance
+        self.target_num = setting['target_num']
         self.exp_distance = setting['exp_distance']
         texture_dir = setting['imgs_dir']
         gym_path = os.path.dirname(gym_unrealcv.__file__)
@@ -80,7 +83,7 @@ class UnrealCvMC(gym.Env):
         self.num_target = len(self.target_list)
         self.resolution = resolution
         self.num_cam = len(self.cam_id)
-        print('cam num', self.num_cam)
+
         self.cam_height = [setting['height'] for i in range(self.num_cam)]
 
         for i in range(len(self.textures_list)):
@@ -124,17 +127,12 @@ class UnrealCvMC(gym.Env):
         self.reward_function = reward.Reward(setting)
 
         if not self.test:
-            if self.reset_type >= 0:  # use when training
-                # print('objects', self.objects_env)
+            if self.reset_type >= 0:
                 self.unrealcv.init_objects(self.objects_env)
 
         self.rendering = False
-        self.reverse = False
 
         self.count_close = 0
-
-        # if self.reset_type == 5:
-        #     self.unrealcv.simulate_physics(self.objects_env)
 
         self.person_id = 0
         self.unrealcv.set_location(0, [self.safe_start[0][0], self.safe_start[0][1], self.safe_start[0][2]+600])
@@ -181,7 +179,6 @@ class UnrealCvMC(gym.Env):
         self.zoom_masks = []
         areas = []
         bboxs = []
-        threshold = []
 
         for i in range(self.num_cam):
             if self.test:
@@ -201,32 +198,12 @@ class UnrealCvMC(gym.Env):
                 area = w * h
                 areas.append(area)
                 self.target_masks.append(object_mask)
-                # self.zoom_masks.append(zoom_mask)
 
                 sparse_reward = 0 if area <= self.max_mask_area[i] else 1
             else:
                 sparse_reward = 0
             self.gate_rewards.append(sparse_reward)
 
-        # print('gt label', self.gate_rewards)
-        # print('areas', areas)
-
-        # zoom_masks = np.hstack([self.zoom_masks[0], self.zoom_masks[1], self.zoom_masks[2], self.zoom_masks[3]])
-        # cv2.imshow("zoom masks", zoom_masks)
-        # cv2.waitKey(10)
-
-        # imgs = np.hstack([self.states[0], self.states[1], self.states[2], self.states[3]])
-        # cv2.imshow("Pose-assisted-multi-camera-collaboration", imgs)
-        # cv2.waitKey(10)
-
-        # target_masks = np.hstack([self.target_masks[0], self.target_masks[1], self.target_masks[2], self.target_masks[3]])
-        # cv2.imshow("target masks", target_masks)
-        # cv2.waitKey(10)
-        # print('threshold', threshold)
-
-        # # test random action
-        # random_actions = np.array([np.random.choice([i for i in range(11)]) for k in range(4)])
-        # actions = np.squeeze(random_actions)
         actions = np.squeeze(actions)
         actions2cam = []
         for i in range(self.num_cam):
@@ -250,13 +227,10 @@ class UnrealCvMC(gym.Env):
             self.unrealcv.set_move(target, actions2target[i][1], actions2target[i][0])
 
         states = []
-        raw_states = []
         zoom_masks = []
         self.mask_gt_ids = []
         areas = []
         zoom_bboxs = []
-        # zoom_angle_hs = []
-        # zoom_angle_vs = []
         self.gt_actions = []
 
         self.gate_gt_ids = np.ones(len(self.cam_id), int)
@@ -274,10 +248,7 @@ class UnrealCvMC(gym.Env):
 
                 self.unrealcv.set_rotation(cam, cam_rot)
                 self.cam_pose[i][-3:] = cam_rot
-                # t0 = time.time()
                 raw_state = self.unrealcv.get_observation(cam, self.observation_type, 'fast')
-                state = raw_state
-
 
                 zoom_state = raw_state[int(self.resolution[1] * (1 - self.zoom_scales[i]) / 2): (
                             self.resolution[1] - int(self.resolution[1] * (1 - self.zoom_scales[i]) / 2)),
@@ -293,8 +264,7 @@ class UnrealCvMC(gym.Env):
                     zoom_state = raw_state[int(self.resolution[1]*(1-self.zoom_scales[i])/2): (self.resolution[1] -
                             int(self.resolution[1]*(1-self.zoom_scales[i])/2)), int(self.resolution[0]*(1-self.zoom_scales[i])/2): (self.resolution[0] -
                                                                                     int(self.resolution[0]*(1-self.zoom_scales[i])/2)), :]
-                    # cv2.imshow('zoom state'.format(str(i)), zoom_state)
-                    # print('state', zoom_state.shape, 'scale',self.zoom_scales[i])
+
                     state = cv2.resize(zoom_state, self.resolution)
                 elif actions2cam[i][0] == -1: # zoom out
                     # self.limit_scales[i] = 1 if self.zoom_scales[i] >= 1 else 0
@@ -307,7 +277,7 @@ class UnrealCvMC(gym.Env):
                                  int(self.resolution[0] * (1 - self.zoom_scales[i]) / 2): (self.resolution[0] - int(self.resolution[0] * (1 - self.zoom_scales[i]) / 2)),:]
                     state = cv2.resize(zoom_state, self.resolution)
 
-            if self.test or not self.test:  # todo : for training
+            if  not self.test:  # todo : for training
                 object_mask = self.unrealcv.read_image(self.cam_id[i], 'object_mask', 'fast')
                 zoom_mask = object_mask[int(self.resolution[1] * (1 - self.zoom_scales[i]) / 2): (
                         self.resolution[1] - int(self.resolution[1] * (1 - self.zoom_scales[i]) / 2)),
@@ -326,69 +296,20 @@ class UnrealCvMC(gym.Env):
                     self.mask_gt_ids.append(0)
                 else:
                     self.mask_gt_ids.append(1)
-                    # self.gate_gt_ids[i] = 0
 
             states.append(state)
             self.unrealcv.set_rotation(cam, cam_rot)
 
         self.states = states
-        # cv2.imshow('tracker_raw_{}'.format(str(0)), raw_states[0])
-        # print('states', len(states))
 
-        # cv2.imshow('tracker_{}'.format(str(0)), self.states[0])
-        # cv2.imshow('tracker_{}'.format(str(1)), self.states[1])
-        # cv2.imshow('tracker_{}'.format(str(2)), self.states[2])
-        # cv2.imshow('tracker_{}'.format(str(3)), self.states[3])
-        # cv2.waitKey(10)
-        # cv2.imwrite('/home/lijing/DEMO/urban_1/save_cam{0}/cam_{1}_eps_{2}_step_{3}.jpg'.format(str(0), str(0), self.record_eps, self.count_steps), self.states[0])
-        # cv2.imwrite('/home/lijing/DEMO/urban_1/save_cam{0}/cam_{1}_eps_{2}_step_{3}.jpg'.format(str(1), str(1), self.record_eps, self.count_steps), self.states[1])
-        # cv2.imwrite('/home/lijing/DEMO/urban_1/save_cam{0}/cam_{1}_eps_{2}_step_{3}.jpg'.format(str(2), str(2), self.record_eps, self.count_steps), self.states[2])
-        # cv2.imwrite('/home/lijing/DEMO/urban_1/save_cam{0}/cam_{1}_eps_{2}_step_{3}.jpg'.format(str(3), str(3), self.record_eps, self.count_steps), self.states[3])
-        # for i in range(self.num_cam):
-        #     path = '/home/lijing/DEMO/urban/save_eps_{0}_step_{1}/'.format(self.record_eps, self.count_steps)
-        #     # path = '/home/lijing/DEMO/garden_1/save_eps_{0}_step_{1}/'.format(self.record_eps, self.count_steps)
-        #     if not os.path.exists(path):
-        #         os.makedirs(path)
-        #     file_path = path + 'cam_{}.jpg'.format(str(i))
-        #     cv2.imwrite(file_path, self.states[i])
-
-        # choose_ids = [0, 0, 1, 1]
-        # self.to_render(choose_ids)
-        # save and visualize
-        # cv2.imwrite('/home/lijing/Test_pics/save_cam{0}_snow.jpg'.format(str(0)),self.states[0])
-        # cv2.imwrite('/home/lijing/Test_pics/save_cam{0}_snow.jpg'.format(str(1)),self.states[1])
-        # cv2.imwrite('/home/lijing/Test_pics/save_cam{0}_snow.jpg'.format(str(2)), self.states[2])
-        # cv2.imwrite('/home/lijing/Test_pics/save_cam{0}_snow.jpg'.format(str(3)), self.states[3])
-        # if self.num_cam == 2:
-        #     imgs = np.hstack([self.states[0], self.states[1]])
-        # elif self.num_cam == 3:
-        #     imgs = np.hstack([self.states[0], self.states[1], self.states[2]])
-        # elif self.num_cam == 4:
-        #     imgs = np.hstack([self.states[0], self.states[1], self.states[2], self.states[3]])
 
         imgs = np.hstack([self.states[0], self.states[1], self.states[2], self.states[3]])
         cv2.imshow("Pose-assisted-multi-camera-collaboration", imgs)
         cv2.waitKey(10)
 
-        # plt.subplot(221)
-        # plt.imshow(self.states[0])
-        # plt.title('camera 0')
-        # plt.xticks([])
-        # plt.yticks([])
-        # plt.show()
-
-        # cv2.imshow('mask_{}'.format(str(0)), zoom_masks[0])
-        # cv2.imshow('mask_{}'.format(str(1)), zoom_masks[1])
-        # cv2.imshow('mask_{}'.format(str(2)), zoom_masks[2])
-        # cv2.imshow('mask_{}'.format(str(3)), zoom_masks[3])
-        # cv2.waitKey(10)
 
         self.count_steps += 1
 
-        # for i, target in enumerate(self.target_list):
-        #     self.target_pos[i] = self.unrealcv.get_obj_pose(target)
-        # # print('target position', self.target_pos)
-        # # print('distance step', np.linalg.norm(np.array(self.target_pos[0][:3]) - np.array(last_target_pos)))
 
         obj_masks = []
         cam_ws = []
@@ -396,13 +317,6 @@ class UnrealCvMC(gym.Env):
 
         directions = []
         rewards = []
-        pose_rewards = []
-        hori_rewards = []
-        verti_rewards = []
-        hori_errors = []
-        verti_errors = []
-
-        zoom_errors = []
         gt_locations = []
 
         zoom_rewards = []
@@ -414,7 +328,6 @@ class UnrealCvMC(gym.Env):
         verti_directions = []
         cal_target_observed = np.zeros(len(self.cam_id))
         self.target_observed = np.zeros(len(self.cam_id))
-        # self.gate_gt_ids = np.ones(len(self.cam_id), int)
 
         # get bbox and reward
         for i in range(len(self.cam_id)):
@@ -448,16 +361,7 @@ class UnrealCvMC(gym.Env):
             zoom_error = abs(self.zoom_scales[i] - expected_scale) / (1 - self.min_scale)
             zoom_reward = 1 - zoom_error
             expected_scales.append(expected_scale)
-
-            mean_error = (2*abs(direction) / 45.0 + 2*abs(verti_direction) / 30.0 + zoom_error) / 3
-            reward = 1 - mean_error
             pose_reward = max(2 - abs(direction) / 45.0 - abs(verti_direction) / 30.0, -2) / 2
-            angle_error = 2 - abs(direction) / 45.0 - abs(verti_direction) / 30.0
-
-            # hori_errors.append(2*abs(direction) / 45.0)
-            # verti_errors.append(2*abs(verti_direction) / 30.0)
-
-            zoom_errors.append(zoom_error)
 
             if abs(direction) <= 45.0 * self.zoom_scales[i] and abs(verti_direction) <= 30.0 * self.zoom_scales[i]:
                 cal_target_observed[i] = 1
@@ -465,29 +369,6 @@ class UnrealCvMC(gym.Env):
                     sparse_reward = pose_reward + zoom_reward if self.mask_gt_ids[i] != 0 else 0
             else:
                 sparse_reward = -1
-
-            # if abs(direction) <= 10.0 * self.zoom_scales[i] and abs(verti_direction) <= 8.0 * self.zoom_scales[i]:
-            #     # print('h angle', 10.0 * self.zoom_scales[i], 'v angle', 8.0 * self.zoom_scales[i])
-            #     self.gate_gt_ids[i] = 0  # by single
-            # if abs(direction) > 10.0 * self.zoom_scales[i] or abs(verti_direction) > 8.0 * self.zoom_scales[i]:
-            # if abs(direction) > 20 or abs(verti_direction) > 15:
-
-            # if abs(direction) > 30.0 * self.zoom_scales[i] or abs(verti_direction) > 20.0 * self.zoom_scales[i]:
-            # if abs(direction) > 10 / self.zoom_scales[i] or abs(verti_direction) > 8 / self.zoom_scales[i]:
-            #     self.random_ids.append(i)
-
-                # if self.limit_scales[i] == 0 and actions2cam[i][0] == 1:
-                #     zoom_reward = (d_scales - self.stand_d) / self.max_distance
-                # elif self.limit_scales[i] == 0 and actions2cam[i][0] == -1:
-                #     zoom_reward = (self.stand_d - d_scales) / self.max_distance
-
-            # if actions2cam[i][0] == 1 and cal_target_observed[i] == 1:
-            # if actions2cam[i][0] == 1 and cal_target_observed[i] == 1:
-            #        if abs(direction) > 45.0 * self.zoom_scales[i] / self.zoom_in_scale[i] or abs(verti_direction) > 40.0 * self.zoom_scales[i] / self.zoom_in_scale[i]:
-            #            zoom_exist_reward = -0.5
-            # elif actions2cam[i][0] == -1 and cal_target_observed[i] == -1:
-            #         if abs(direction) <= 45.0 * self.zoom_scales[i] / self.zoom_out_scale[i] and abs(verti_direction) <= 40.0 * self.zoom_scales[i] / self.zoom_out_scale[i]:
-            #             zoom_exist_reward = 0.5
 
             reward = sparse_reward if not self.test else pose_reward
             pose_rewards.append(pose_reward)
@@ -504,16 +385,11 @@ class UnrealCvMC(gym.Env):
         info['zoom bboxs'] = zoom_bboxs
         info['states'] = self.states
         info['mask gt ids'] = self.mask_gt_ids
-        # info['zoom angle hs'] = zoom_angle_hs
-        # info['zoom angle vs'] = zoom_angle_vs
+
         info['Distance'] = distances
         info['zoom reward'] = zoom_rewards
         info['hori reward'] = hori_rewards
         info['verti reward'] = verti_rewards
-
-        # info['hori_errors'] = hori_errors
-        # info['verti errors'] = verti_errors
-        info['zoom errors'] = zoom_errors
 
         info['areas'] = areas
         info['w'] = cam_ws
@@ -538,16 +414,13 @@ class UnrealCvMC(gym.Env):
         if self.count_steps > self.max_steps:
             info['Done'] = True
 
-        # if sum(cal_target_observed) < 2:
-        #     info['Done'] = True
-        if not self.test:  # test eps for fixed 500 steps for each episode
-            if sum(cal_target_observed) < 2:  # 2 for gate training; 2 for testing
-                # print('observed num', sum(self.target_observed), 'count step', self.count_steps)
+        if not self.test:
+            if sum(cal_target_observed) < 2:
                 self.count_close += 1
             else:
                 self.count_close = 0
 
-            if self.count_close > 10:  # fix testing length
+            if self.count_close > 10:
                 info['Done'] = True
 
         if info['Done']:
@@ -584,28 +457,20 @@ class UnrealCvMC(gym.Env):
                                     self.safe_start[0][-1]])
 
         for i, target in enumerate(self.target_list):
-            # self.unrealcv.set_move(target, 0, 0)
             self.unrealcv.set_move(target, self.safe_start[i][0], self.safe_start[i][1])
-            # self.unrealcv.set_move(target, self.target_pos[0], self.target_pos[1])  # test for garden
 
         if self.reset_type >= 1:
             if self.env_name == 'MCMTRoom':
                 map_id = [2, 3, 6, 7, 9]
-                # map_id = [1, 2, 3, 4]
                 spline = False
                 object_app = np.random.choice(map_id)
-                tracker_app = np.random.choice(map_id)
             else:
-                map_id = [6, 7, 9, 3] # [1, 2, 3, 4, 5]
-                # map_id = [6, 7, 8, 9] #[1, 2, 3, 4]
+                map_id = [6, 7, 9, 3]
                 spline = True
                 object_app = map_id[self.person_id % len(map_id)]
-                tracker_app = map_id[(self.person_id+1) % len(map_id)]
                 self.person_id += 1
-                # map_id = [6, 7, 8, 9]
-            print('appearance id', object_app)
+
             self.unrealcv.set_appearance(self.target_list[0], object_app, spline)
-            # self.unrealcv.set_appearance(self.target_list[1], tracker_app, spline)
             self.obstacles_num = self.max_obstacles
             self.obstacle_scales = [[1, 1.2] if np.random.binomial(1, 0.5) == 0 else [1.5, 2] for k in range(self.obstacles_num)]
             self.unrealcv.clean_obstacles()
@@ -629,7 +494,6 @@ class UnrealCvMC(gym.Env):
         # target appearance
         if self.reset_type >= 3:
             self.unrealcv.random_player_texture(self.target_list[0], self.textures_list, 3)
-            # self.unrealcv.random_texture(self.background_list, self.textures_list, 3)
             self.unrealcv.random_texture(self.background_list, self.textures_list, 5)
 
         # texture
@@ -646,10 +510,8 @@ class UnrealCvMC(gym.Env):
             self.unrealcv.set_obj_location(target, self.safe_start[i])
             self.target_pos.append(self.unrealcv.get_obj_pose(target))
 
-        # get state
-        # random camera
+
         states = []
-        # self.zoom_scales = []
         self.cam_pose = []
         self.fixed_cam = True if self.test  else False
         self.gt_actions = []
@@ -660,12 +522,6 @@ class UnrealCvMC(gym.Env):
             for i, cam in enumerate(self.cam_id):
                 if self.fixed_cam:
                     cam_loc = self.camera_loc[i]
-                    # if i % 4 <= 1:
-                    #     cam_loc = [self.reset_area[i % 4], (self.reset_area[2] + self.reset_area[3]) / 2,
-                    #                self.cam_height[i]]
-                    # else:
-                    #     cam_loc = [(self.reset_area[0] + self.reset_area[1]) / 2, self.reset_area[i % 4],
-                    #                self.cam_height[i]]
                 else:
                     cam_loc = [np.random.randint(self.cam_area[i][0], self.cam_area[i][1]),
                                np.random.randint(self.cam_area[i][2], self.cam_area[i][3]),
@@ -678,30 +534,11 @@ class UnrealCvMC(gym.Env):
                 cam_rot[1] += angle_h
                 cam_rot[2] -= angle_v
 
-                # errors = []
-                # for ac_id, ac in enumerate(self.discrete_actions):
-                #     h_error = abs(ac[0] - angle_h)
-                #     v_error = abs(ac[1] - angle_v)
-                #     error = h_error + v_error
-                #     errors.append(error)
-                # best_action_id = errors.index(min(errors))
-                # best_action = self.discrete_actions[best_action_id]
-                # gt_action = best_action
 
                 self.unrealcv.set_rotation(cam, cam_rot)
                 self.cam_pose.append(cam_loc + cam_rot)
-                d = self.unrealcv.get_distance(self.cam_pose[i], self.target_pos[0], 3)
-                expected_scale = self.scale_function(d)
-                expected_scale = expected_scale if expected_scale >= self.min_scale else self.min_scale
-                expected_scale = expected_scale if expected_scale <= 1 else 1
 
                 raw_state = self.unrealcv.get_observation(cam, self.observation_type, 'fast')
-                # zoom_state = raw_state[int(self.resolution[1] * (1 - expected_scale) / 2): (
-                #         self.resolution[1] - int(self.resolution[1] * (1 - expected_scale) / 2)),
-                #              int(self.resolution[0] * (1 - expected_scale) / 2): (
-                #                      self.resolution[0] - int(self.resolution[0] * (1 - expected_scale) / 2)),
-                #              :]
-                # state = cv2.resize(zoom_state, self.resolution)
 
                 object_mask = self.unrealcv.read_image(self.cam_id[i], 'object_mask', 'fast')
                 zoom_mask = object_mask[int(self.resolution[1] * (1 - self.zoom_scales[i]) / 2): (
@@ -720,8 +557,6 @@ class UnrealCvMC(gym.Env):
                     self.mask_gt_ids.append(1)
 
                 states.append(raw_state)
-
-                # sparse_reward = 0 if area <= self.max_mask_area[i] * self.zoom_scales[i] else 1
                 sparse_reward = 0 if area <= self.max_mask_area[i] else 1
                 self.gate_rewards.append(sparse_reward)
 
@@ -746,27 +581,11 @@ class UnrealCvMC(gym.Env):
                 self.unrealcv.set_location(cam, cam_loc)
                 self.unrealcv.set_rotation(cam, cam_rot)
                 self.cam_pose.append(cam_loc+cam_rot)
-                # d = self.unrealcv.get_distance(self.cam_pose[i], self.target_pos[0], 3)
-                # expected_scale = self.scale_function(d)
-                # expected_scale = expected_scale if expected_scale >= self.min_scale else self.min_scale
-                # expected_scale = expected_scale if expected_scale <= 1 else 1
-                # self.zoom_scales.append(expected_scale)
+
                 raw_state = self.unrealcv.get_observation(cam, self.observation_type, 'fast')
-                zoom_state = raw_state[int(self.resolution[1] * (1 - self.zoom_scales[i]) / 2): (
-                            self.resolution[1] - int(self.resolution[1] * (1 - self.zoom_scales[i]) / 2)),
-                             int(self.resolution[0] * (1 - self.zoom_scales[i]) / 2): (
-                                         self.resolution[0] - int(self.resolution[0] * (1 - self.zoom_scales[i]) / 2)),
-                             :]
-                state = cv2.resize(zoom_state, self.resolution)
                 states.append(raw_state)
-                # self.zoom_scales = np.ones(self.num_cam)
 
                 object_mask = self.unrealcv.read_image(self.cam_id[i], 'object_mask', 'fast')
-                # zoom_mask = object_mask[int(self.resolution[1] * (1 - self.zoom_scales[i]) / 2): (
-                #         self.resolution[1] - int(self.resolution[1] * (1 - self.zoom_scales[i]) / 2)),
-                #             int(self.resolution[0] * (1 - self.zoom_scales[i]) / 2): (self.resolution[0] - int(
-                #                 self.resolution[0] * (1 - self.zoom_scales[i]) / 2)), :]
-                # zoom_mask = cv2.resize(zoom_mask, self.resolution)
                 bbox, _ = self.unrealcv.get_bboxes(object_mask, self.target_list)
                 w = self.resolution[0] * (bbox[0][1][0] - bbox[0][0][0])
                 h = self.resolution[1] * (bbox[0][1][1] - bbox[0][0][1])
@@ -777,7 +596,6 @@ class UnrealCvMC(gym.Env):
                 else:
                     self.mask_gt_ids.append(1)
 
-                # sparse_reward = 0 if area <= self.max_mask_area[i] * self.zoom_scales[i] else 1
                 sparse_reward = 0 if area <= self.max_mask_area[i] else 1
                 self.gate_rewards.append(sparse_reward)
 
@@ -1003,16 +821,6 @@ def map_render(camera_pos, target_pos, choose_ids, env):
         lengths.append(length)
     pose_scale = max(lengths)
 
-    # dx_lengths, dy_lengths = [], []
-    # for i in range(num_cam):
-    #     dx_lengths.append(abs(camera_position_origin[i][0]))
-    #     dy_lengths.append(abs(camera_position_origin[i][1]))
-    # dx_scale = max(dx_lengths) / 2
-    # dy_scale = max(dy_lengths)
-    # print('dx_scale', dx_scale, 'dy_scale', dy_scale)
-    # dx_scale /= 10
-    # dy_scale /= 10
-
     # urban
     if 'Urban' in env:
         target_move = np.array([0, 1000])
@@ -1039,8 +847,6 @@ def map_render(camera_pos, target_pos, choose_ids, env):
     color_dict = {'red': [255, 0, 0], 'black': [0, 0, 0], 'blue': [0, 0, 255], 'green': [0, 255, 0],
                   'darkred': [128, 0, 0], 'yellow': [255, 255, 0], 'deeppink': [255, 20, 147]}
 
-    # print('camera_position', camera_position)
-    # print('target_position', target_position)
 
     # plot camera
     for i in range(num_cam):
@@ -1081,12 +887,7 @@ def map_render(camera_pos, target_pos, choose_ids, env):
     plt.xticks([])
     plt.yticks([])
     plt.pause(0.01)
-    # path = '/home/lijing/DEMO/urban/save_eps_{0}_step_{1}/'.format(record_eps, step)  #  for urban
-    # path = '/home/lijing/DEMO/garden/save_eps_{0}_step_{1}/'.format(record_eps, step)  #  for garden
-    # if not os.path.exists(path):
-    #     os.makedirs(path)
-    # file_path = path + '2d_map.jpg'
-    # plt.savefig(file_path)
+
 
 class GoalNavAgentTest(object):
     """The world's simplest agent!"""
@@ -1101,8 +902,6 @@ class GoalNavAgentTest(object):
         self.angle_low = action_space['low'][1]
         self.goal_area = goal_area
         self.goal_list = goal_list
-
-        self.reverse = False
 
         self.goal = self.generate_goal(self.goal_area)
 
@@ -1145,17 +944,11 @@ class GoalNavAgentTest(object):
                 self.angle = self.angle_low / 2
         else:
             self.angle = np.clip(delt_yaw, self.angle_low, self.angle_high)
-            # self.angle = delt_yaw
-            velocity = self.velocity * (1 + 0.2 * np.random.random())  # 40 garden
-            # velocity = 40
-            # print('target velocity', velocity)
+            velocity = self.velocity * (1 + 0.2 * np.random.random())
 
         return (velocity, self.angle)
 
     def reset(self):
-        # self.reverse = reverse
-        # print('agents reverse', self.reverse)
-        # print('goal pose', self.goal, 'goal id', self.goal_id)
         self.step_counter = 0
         self.keep_steps = 0
         self.goal_id = 0
@@ -1165,13 +958,8 @@ class GoalNavAgentTest(object):
 
     def generate_goal(self, goal_area):
         if len(self.goal_list) != 0:
-            # if self.reverse:
-            #     index = len(self.goal_list) - 1 - self.goal_id % len(self.goal_list)
-            # else:
-            #     index = self.goal_id%len(self.goal_list)
             index = self.goal_id % len(self.goal_list)
             goal = np.array(self.goal_list[index])
-            # print('goal coordinator', goal)
         else:
             x = np.random.randint(goal_area[0], goal_area[1])
             y = np.random.randint(goal_area[2], goal_area[3])
