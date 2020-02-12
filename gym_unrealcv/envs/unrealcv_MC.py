@@ -144,7 +144,7 @@ class UnrealCvMC(gym.Env):
             if not self.test:
                 self.random_agents = [GoalNavAgent(self.continous_actions_player, self.reset_area) for i in range(self.num_target)]
             else:
-                self.random_agents = [GoalNavAgentTest(self.continous_actions_player, self.reset_area, goal_list=self.goal_list)
+                self.random_agents = [GoalNavAgentTest(self.continous_actions_player, goal_list=self.goal_list)
                                       for i in range(self.num_target)]
         if 'Internal' in self.nav:
             self.unrealcv.set_random(self.target_list[0])
@@ -474,7 +474,8 @@ class UnrealCvMC(gym.Env):
             self.obstacles_num = self.max_obstacles
             self.obstacle_scales = [[1, 1.2] if np.random.binomial(1, 0.5) == 0 else [1.5, 2] for k in range(self.obstacles_num)]
             self.unrealcv.clean_obstacles()
-            self.unrealcv.random_obstacles(self.objects_env, self.textures_list,
+            if not self.test:
+                self.unrealcv.random_obstacles(self.objects_env, self.textures_list,
                                            self.obstacles_num, self.reset_area, self.start_area, self.obstacle_scales)
         # light
         if self.reset_type >= 2:
@@ -502,7 +503,8 @@ class UnrealCvMC(gym.Env):
                                     range(self.obstacles_num)]
             self.obstacles_num = self.max_obstacles
             self.unrealcv.clean_obstacles()
-            self.unrealcv.random_obstacles(self.objects_env, self.textures_list,
+            if not self.test:
+                self.unrealcv.random_obstacles(self.objects_env, self.textures_list,
                                            self.obstacles_num, self.reset_area, self.start_area, self.obstacle_scales)
 
         self.target_pos = []
@@ -808,7 +810,6 @@ def map_render(camera_pos, target_pos, choose_ids, env):
 
     length = 600
     coordinate_delta = np.mean(np.array(camera_pos)[:, :2], axis=0)
-    # print('coordinate_delta', coordinate_delta)
     img = np.zeros((length + 1, length + 1, 3)) + 255
     num_cam = len(camera_pos)
 
@@ -892,7 +893,7 @@ def map_render(camera_pos, target_pos, choose_ids, env):
 class GoalNavAgentTest(object):
     """The world's simplest agent!"""
 
-    def __init__(self, action_space, goal_area, nav='New', goal_list=None):
+    def __init__(self, action_space, nav='New', goal_list=None):
         self.step_counter = 0
         self.keep_steps = 0
         self.goal_id = 0
@@ -900,10 +901,9 @@ class GoalNavAgentTest(object):
         self.velocity_low = action_space['low'][0]
         self.angle_high = action_space['high'][1]
         self.angle_low = action_space['low'][1]
-        self.goal_area = goal_area
         self.goal_list = goal_list
 
-        self.goal = self.generate_goal(self.goal_area)
+        self.goal = self.generate_goal()
 
         if 'Base' in nav:
             self.discrete = True
@@ -924,12 +924,11 @@ class GoalNavAgentTest(object):
             d_moved = np.linalg.norm(np.array(self.pose_last) - np.array(pose))
             self.pose_last = pose
         if self.check_reach(self.goal, pose) or d_moved < 3 or self.step_counter > self.max_len:
-            self.goal = self.generate_goal(self.goal_area)
+            self.goal = self.generate_goal()
             if self.discrete:
                 self.velocity = (self.velocity_high + self.velocity_low) / 2
             else:
                 self.velocity = np.random.randint(self.velocity_low, self.velocity_high)
-                # self.velocity = 70
             self.step_counter = 0
 
         delt_yaw = self.get_direction(pose, self.goal)
@@ -952,18 +951,14 @@ class GoalNavAgentTest(object):
         self.step_counter = 0
         self.keep_steps = 0
         self.goal_id = 0
-        self.goal = self.generate_goal(self.goal_area)
+        self.goal = self.generate_goal()
         self.velocity = np.random.randint(self.velocity_low, self.velocity_high)
         self.pose_last = None
 
-    def generate_goal(self, goal_area):
-        if len(self.goal_list) != 0:
-            index = self.goal_id % len(self.goal_list)
-            goal = np.array(self.goal_list[index])
-        else:
-            x = np.random.randint(goal_area[0], goal_area[1])
-            y = np.random.randint(goal_area[2], goal_area[3])
-            goal = np.array([x, y])
+    def generate_goal(self):
+        index = self.goal_id % len(self.goal_list)
+        goal = np.array(self.goal_list[index])
+
         self.goal_id += 1
         return goal
 
