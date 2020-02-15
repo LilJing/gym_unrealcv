@@ -307,11 +307,6 @@ class UnrealCvMC(gym.Env):
 
         self.states = states
 
-
-        imgs = np.hstack([self.states[0], self.states[1], self.states[2], self.states[3]])
-        cv2.imshow("Pose-assisted-multi-camera-collaboration", imgs)
-        cv2.waitKey(10)
-
         self.count_steps += 1
 
         obj_masks = []
@@ -621,12 +616,9 @@ class UnrealCvMC(gym.Env):
         self.unreal.close()
 
     def render(self, mode='rgb_array', close=False):
-        if close==True:
-            self.unreal.close()
-        for i in range(self.num_cam):
-            cv2.imshow('tracker_{}'.format(str(i)), self.states[i])
+        imgs = np.hstack([self.states[0], self.states[1], self.states[2], self.states[3]])
+        cv2.imshow("Pose-assisted-multi-camera-collaboration", imgs)
         cv2.waitKey(10)
-        return self.unrealcv.img_color
 
     def to_render(self, choose_ids):
         map_render(self.cam_pose, self.target_pos[0],  choose_ids, self.target_move, self.camera_move, self.scale_rate, self.pose_rate)
