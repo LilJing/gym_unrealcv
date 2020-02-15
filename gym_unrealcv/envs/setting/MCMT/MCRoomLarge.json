@@ -16,7 +16,7 @@
         "targetbp2"
 	],
 
-	"discrete_actions_big": [
+	"discrete_actions": [
 		[ 0,  0],
 		[ 0,  10],
 		[ 0, -10],
@@ -76,6 +76,11 @@
 
     "lights": [
       "light1", "light2", "light3", "light4"
-    ]
+    ],
+
+	"target_move": [200, 200],
+    "camera_move": [200, 200],
+	"scale_rate": 0 ,
+	"pose_rate": 0.5
 
 }

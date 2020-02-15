@@ -69,6 +69,11 @@ class UnrealCvMC(gym.Env):
         if setting.get('camera_loc'):
             self.camera_loc = setting['camera_loc']
 
+        self.target_move = setting['target_move']
+        self.camera_move = setting['camera_move']
+        self.scale_rate = setting['scale_rate']
+        self.pose_rate = setting['pose_rate']
+
         self.background_list = setting['backgrounds']
         self.light_list = setting['lights']
         self.target_num = setting['target_num']
@@ -277,7 +282,7 @@ class UnrealCvMC(gym.Env):
                                  int(self.resolution[0] * (1 - self.zoom_scales[i]) / 2): (self.resolution[0] - int(self.resolution[0] * (1 - self.zoom_scales[i]) / 2)),:]
                     state = cv2.resize(zoom_state, self.resolution)
 
-            if  not self.test:  # todo : for training
+            if  not self.test:
                 object_mask = self.unrealcv.read_image(self.cam_id[i], 'object_mask', 'fast')
                 zoom_mask = object_mask[int(self.resolution[1] * (1 - self.zoom_scales[i]) / 2): (
                         self.resolution[1] - int(self.resolution[1] * (1 - self.zoom_scales[i]) / 2)),
@@ -307,9 +312,7 @@ class UnrealCvMC(gym.Env):
         cv2.imshow("Pose-assisted-multi-camera-collaboration", imgs)
         cv2.waitKey(10)
 
-
         self.count_steps += 1
-
 
         obj_masks = []
         cam_ws = []
@@ -396,7 +399,6 @@ class UnrealCvMC(gym.Env):
         info['h'] = cam_hs
         info['expected scale'] = expected_scales
         info['zoom scale'] = self.zoom_scales
-        # info['zoom exist reward'] = zoom_exist_rewards
 
         info['hori reward'] = hori_rewards
         info['verti reward'] = verti_rewards
@@ -627,7 +629,7 @@ class UnrealCvMC(gym.Env):
         return self.unrealcv.img_color
 
     def to_render(self, choose_ids):
-        map_render(self.cam_pose, self.target_pos[0],  choose_ids, self.env_name)
+        map_render(self.cam_pose, self.target_pos[0],  choose_ids, self.target_move, self.camera_move, self.scale_rate, self.pose_rate)
 
     def seed(self, seed=None):
         self.person_id = seed
@@ -699,8 +701,7 @@ class UnrealCvMC(gym.Env):
         return start_area
 
     def scale_function(self, d):
-        # scale = 449 / d  # big camera area
-        scale = 200 / d  # small camera area
+        scale = 449 / d
         return scale
 
 class RandomAgent(object):
@@ -806,7 +807,7 @@ class GoalNavAgent(object):
         return angle_now
 
 
-def map_render(camera_pos, target_pos, choose_ids, env):
+def map_render(camera_pos, target_pos, choose_ids, target_move, camera_move, scale_rate, pose_rate):
 
     length = 600
     coordinate_delta = np.mean(np.array(camera_pos)[:, :2], axis=0)
@@ -815,39 +816,27 @@ def map_render(camera_pos, target_pos, choose_ids, env):
 
     camera_position_origin = np.array([camera_pos[i][:2] for i in range(num_cam)])
     target_position_origin = np.array(target_pos[:2])
-    #
+
     lengths = []
     for i in range(num_cam):
         length = np.sqrt(sum(np.array(camera_position_origin[i] - coordinate_delta)) ** 2)
         lengths.append(length)
     pose_scale = max(lengths)
 
-    # urban
-    if 'Urban' in env:
-        target_move = np.array([0, 1000])
-        camera_move = np.array([0, 0])
-        scale_rate = 0.8
-    elif 'Garden' in env:
-        target_move = np.array([0, 300])
-        camera_move = np.array([0, 0])
-        scale_rate = 1
-    else:
-        print('ENV ERROR')
-
-    target_position = length * (np.array([scale_rate + (target_position_origin[0] - coordinate_delta[0]) /pose_scale / 2, scale_rate +
-                                          (target_position_origin[1] - coordinate_delta[0]) / pose_scale / 2])) / 2 + target_move
+    pose_scale = pose_scale * pose_rate
+    target_position = length * (np.array([scale_rate + (target_position_origin[0] - coordinate_delta[0]) / pose_scale, scale_rate +
+                                          (target_position_origin[1] - coordinate_delta[0]) / pose_scale])) / 2 + np.array(target_move)
 
     camera_position = []
     for i in range(num_cam):
-        position_transfer = length * (np.array([scale_rate + (camera_position_origin[i][0] - coordinate_delta[0]) / pose_scale / 2,
-                                                scale_rate + (camera_position_origin[i][1] - coordinate_delta[1]) / pose_scale / 2])) / 2 + camera_move
+        position_transfer = length * (np.array([scale_rate + (camera_position_origin[i][0] - coordinate_delta[0]) / pose_scale,
+                                                scale_rate + (camera_position_origin[i][1] - coordinate_delta[1]) / pose_scale])) / 2 + np.array(camera_move)
         camera_position.append(position_transfer)
 
     abs_angles = [camera_pos[i][4] for i in range(num_cam)]
 
     color_dict = {'red': [255, 0, 0], 'black': [0, 0, 0], 'blue': [0, 0, 255], 'green': [0, 255, 0],
                   'darkred': [128, 0, 0], 'yellow': [255, 255, 0], 'deeppink': [255, 20, 147]}
-
 
     # plot camera
     for i in range(num_cam):

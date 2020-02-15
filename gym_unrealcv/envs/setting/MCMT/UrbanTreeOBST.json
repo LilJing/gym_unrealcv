@@ -85,6 +85,10 @@
     ],
     "lights": [
       "light1", "light2", "light3", "light4"
-    ]
+    ],
+	"target_move": [0, 1000],
+    "camera_move": [0, 0],
+	"scale_rate": 0.8,
+	"pose_rate": 2
 
 }
