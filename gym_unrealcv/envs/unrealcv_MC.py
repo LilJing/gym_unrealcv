@@ -39,7 +39,6 @@ class UnrealCvMC(gym.Env):
 
         self.docker = docker
         self.reset_type = reset_type
-        self.roll = 0
         self.nav = nav
         setting = self.load_env_setting(setting_file)
         self.env_name = setting['env_name']
@@ -50,9 +49,6 @@ class UnrealCvMC(gym.Env):
         self.continous_actions = setting['continous_actions']
         self.continous_actions_player = setting['continous_actions_player']
         self.max_steps = setting['max_steps']
-        self.max_distance = setting['max_distance']
-        self.min_distance = setting['min_distance']
-        self.max_direction = setting['max_direction']
         self.max_obstacles = setting['max_obstacles']
         self.height = setting['height']
         self.pitch = setting['pitch']
@@ -77,7 +73,6 @@ class UnrealCvMC(gym.Env):
         self.background_list = setting['backgrounds']
         self.light_list = setting['lights']
         self.target_num = setting['target_num']
-        self.exp_distance = setting['exp_distance']
         texture_dir = setting['imgs_dir']
         gym_path = os.path.dirname(gym_unrealcv.__file__)
         texture_dir = os.path.join(gym_path, 'envs', 'UnrealEnv', texture_dir)
@@ -110,11 +105,10 @@ class UnrealCvMC(gym.Env):
         assert self.action_type == 'Discrete' or self.action_type == 'Continuous'
         if self.action_type == 'Discrete':
             self.action_space = [spaces.Discrete(len(self.discrete_actions)) for i in range(self.num_cam)]
-            player_action_space = [spaces.Discrete(len(self.discrete_actions_player)) for i in range(1)]
+
         elif self.action_type == 'Continuous':
             self.action_space = [spaces.Box(low=np.array(self.continous_actions['low']),
                                             high=np.array(self.continous_actions['high'])) for i in range(self.num_cam)]
-            player_action_space = spaces.Discrete(len(self.continous_actions_player))
 
         self.count_steps = 0
 
@@ -134,8 +128,6 @@ class UnrealCvMC(gym.Env):
         if not self.test:
             if self.reset_type >= 0:
                 self.unrealcv.init_objects(self.objects_env)
-
-        self.rendering = False
 
         self.count_close = 0
 
@@ -157,12 +149,8 @@ class UnrealCvMC(gym.Env):
         if 'Interval' in self.nav:
             self.unrealcv.set_interval(30)
 
-        self.cam_angles = np.array([0 for i in range(self.num_cam)])
-
-        self.scale = 1000.0
-        self.gate_ids = np.ones(self.num_cam)
         self.record_eps = 0
-        self.max_mask_area = np.ones(self.num_cam) * 0.001 * self.resolution[0] * self.resolution[1]  # 76.8
+        self.max_mask_area = np.ones(self.num_cam) * 0.001 * self.resolution[0] * self.resolution[1]
 
     def step(self, actions):
         info = dict(
@@ -176,13 +164,6 @@ class UnrealCvMC(gym.Env):
         self.current_cam_pos = self.cam_pose.copy()
         self.current_target_pos = self.target_pos.copy()
         self.current_states = self.states
-
-        self.gate_rewards = []
-        self.gt_masks = []
-        self.mask_bboxs = []
-        self.target_masks = []
-        self.zoom_masks = []
-        bboxs = []
 
         actions = np.squeeze(actions)
         actions2cam = []
@@ -206,10 +187,7 @@ class UnrealCvMC(gym.Env):
             self.unrealcv.set_move(target, actions2target[i][1], actions2target[i][0])
 
         states = []
-        zoom_masks = []
         self.gate_ids = []
-        areas = []
-        zoom_bboxs = []
         self.gt_actions = []
 
         self.gate_gt_ids = np.ones(len(self.cam_id), int)
@@ -262,12 +240,9 @@ class UnrealCvMC(gym.Env):
                             self.resolution[0] * (1 - self.zoom_scales[i]) / 2)), :]
             zoom_mask = cv2.resize(zoom_mask, self.resolution)
             bbox, _ = self.unrealcv.get_bboxes(zoom_mask, self.target_list)
-            zoom_bboxs.append(bbox[0])
-            zoom_masks.append(zoom_mask)
             w = self.resolution[0] * (bbox[0][1][0] - bbox[0][0][0])
             h = self.resolution[1] * (bbox[0][1][1] - bbox[0][0][1])
             area = w * h
-            areas.append(area)
 
             if area <= self.max_mask_area[i]:
                 self.gate_ids.append(0)
@@ -278,24 +253,14 @@ class UnrealCvMC(gym.Env):
             self.unrealcv.set_rotation(cam, cam_rot)
 
         self.states = states
-
         self.count_steps += 1
 
-
-        cam_ws = []
-        cam_hs = []
-
-        directions = []
         rewards = []
         gt_locations = []
 
-        zoom_rewards = []
-        pose_rewards = []
         expected_scales = []
         hori_rewards = []
         verti_rewards = []
-        distances = []
-        verti_directions = []
         cal_target_observed = np.zeros(len(self.cam_id))
         self.target_observed = np.zeros(len(self.cam_id))
 
@@ -329,41 +294,7 @@ class UnrealCvMC(gym.Env):
                 sparse_reward = -1
 
             reward = sparse_reward
-            pose_rewards.append(pose_reward)
             rewards.append(reward)
-            zoom_rewards.append(zoom_reward)
-            hori_rewards.append(hori_reward)
-            verti_rewards.append(verti_reward)
-            directions.append(direction)
-            verti_directions.append(verti_direction)
-            distances.append(d)
-
-        info['zoom masks'] = zoom_masks
-        info['zoom bboxs'] = zoom_bboxs
-        info['states'] = self.states
-
-        info['Distance'] = distances
-        info['zoom reward'] = zoom_rewards
-        info['hori reward'] = hori_rewards
-        info['verti reward'] = verti_rewards
-
-        info['areas'] = areas
-        info['w'] = cam_ws
-        info['h'] = cam_hs
-        info['expected scale'] = expected_scales
-        info['zoom scale'] = self.zoom_scales
-
-        info['hori reward'] = hori_rewards
-        info['verti reward'] = verti_rewards
-
-        info['target poses'] = self.current_target_pos
-        info['camera poses'] = self.current_cam_pos
-        info['tracking reward'] = pose_rewards
-        info['zoom reward'] = zoom_rewards
-        info['bboxs'] = bboxs
-
-        info['zoom scale'] = self.zoom_scales
-        info['gate ids'] = self.gate_ids
 
         if self.count_steps > self.max_steps:
             info['Done'] = True
@@ -380,10 +311,9 @@ class UnrealCvMC(gym.Env):
         if info['Done']:
             self.record_eps += 1
 
+        info['states'] = self.states
+        info['gate ids'] = self.gate_ids
         info['Reward'] = rewards
-        info['Pose Reward'] = pose_rewards
-        info['gt actions'] = self.gt_actions
-        info['gt locations'] = gt_locations
         info['Success rate'] = sum(cal_target_observed) / self.num_cam
         info['Success ids'] = cal_target_observed
 
@@ -577,7 +507,6 @@ class UnrealCvMC(gym.Env):
         angle = np.arctan2(height, plane_distance) / np.pi * 180
         angle_now = angle + current_pose[-1]
         return angle_now
-
 
     def load_env_setting(self, filename):
         gym_path = os.path.dirname(gym_unrealcv.__file__)

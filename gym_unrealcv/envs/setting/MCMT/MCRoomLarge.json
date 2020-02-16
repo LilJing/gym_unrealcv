@@ -7,11 +7,7 @@
 	"height": 350,
 	"pitch": 0,
 	"max_steps": 500,
-	"max_distance": 1000,
-	"min_distance": 100,
-	"max_direction": 90,
 	"max_obstacles": 3,
-	"exp_distance": 250,
 	"targets": [
         "targetbp2"
 	],
