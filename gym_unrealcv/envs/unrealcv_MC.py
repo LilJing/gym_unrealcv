@@ -1,29 +1,23 @@
 import math
 import os
-import time
 import gym
 import numpy as np
 from gym import spaces
-from gym_unrealcv.envs.tracking import reward
-from gym_unrealcv.envs.tracking.visualization import show_info
 from gym_unrealcv.envs.utils import env_unreal
 from gym_unrealcv.envs.tracking.interaction import Tracking
 import gym_unrealcv
 import cv2
-import random
 import matplotlib.pyplot as plt
-import time
-# from pylab import *
 
 ''' 
-It is an env for active object tracking.
+It is an env for multi-camera active object tracking.
 
 State : raw color image and depth
-Action:  (linear velocity ,angle velocity) 
-Done : the relative distance or angle to target is larger than the threshold.
+Action:  rotation on yaw and pitch angle with zooming in or out
+Done : the relative angle to target is larger than the threshold
 Task: Learn to follow the target object(moving person) in the scene
 '''
-# np.random.seed(123)
+
 
 class UnrealCvMC(gym.Env):
     def __init__(self,
