@@ -81,9 +81,13 @@
     "lights": [
       "light1", "light2", "light3", "light4"
     ],
+
 	"target_move": [0, 300],
     "camera_move": [0, 0],
 	"scale_rate": 1,
-	"pose_rate": 2
+	"pose_rate": 2,
+
+	"yaw_max": 45.0,
+	"pitch_max": 30.0
 
 }

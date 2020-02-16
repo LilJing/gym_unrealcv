@@ -31,7 +31,6 @@ class UnrealCvMC(gym.Env):
                  reset_type,
                  action_type='discrete',  # 'discrete', 'continuous'
                  observation_type='Color',  # 'color', 'depth', 'rgbd', 'Gray'
-                 reward_type='distance',  # distance
                  docker=False,
                  resolution= (320, 240),
                  nav='Random',  # Random, Goal, Internal
@@ -42,6 +41,7 @@ class UnrealCvMC(gym.Env):
         self.nav = nav
         setting = self.load_env_setting(setting_file)
         self.env_name = setting['env_name']
+        self.test = False if 'MCMTRoom' in self.env_name else True
         self.cam_id = setting['cam_id']
         self.target_list = setting['targets']
         self.discrete_actions = setting['discrete_actions']
@@ -53,13 +53,13 @@ class UnrealCvMC(gym.Env):
         self.height = setting['height']
         self.pitch = setting['pitch']
         self.objects_env = setting['objects_list']
+        self.yaw_max = setting['yaw_max']
+        self.pitch_max = setting['pitch_max']
+
         if setting.get('reset_area'):
             self.reset_area = setting['reset_area']
         if setting.get('cam_area'):
             self.cam_area = setting['cam_area']
-
-        self.test = False if 'MCMTRoom' in self.env_name else True
-
         if setting.get('goal_list'):
             self.goal_list = setting['goal_list']
         if setting.get('camera_loc'):
@@ -120,10 +120,6 @@ class UnrealCvMC(gym.Env):
                                   for i in range(self.num_cam)]
 
         self.unrealcv.pitch = self.pitch
-        # define reward type
-        # distance, bbox, bbox_distance
-        self.reward_type = reward_type
-        self.reward_function = reward.Reward(setting)
 
         if not self.test:
             if self.reset_type >= 0:
@@ -161,8 +157,8 @@ class UnrealCvMC(gym.Env):
             Steps=self.count_steps,
         )
 
-        self.current_cam_pos = self.cam_pose.copy()
-        self.current_target_pos = self.target_pos.copy()
+        self.current_cam_pos = self.cam_pose
+        self.current_target_pos = self.target_pos
         self.current_states = self.states
 
         actions = np.squeeze(actions)
@@ -188,9 +184,6 @@ class UnrealCvMC(gym.Env):
 
         states = []
         self.gate_ids = []
-        self.gt_actions = []
-
-        self.gate_gt_ids = np.ones(len(self.cam_id), int)
 
         for i, cam in enumerate(self.cam_id):
             cam_rot = self.unrealcv.get_rotation(cam, 'hard')
@@ -212,10 +205,8 @@ class UnrealCvMC(gym.Env):
                 state = cv2.resize(zoom_state, self.resolution)
 
             else:  # zoom action
-
                 raw_state = self.unrealcv.get_observation(cam, self.observation_type, 'fast')
                 if actions2cam[i][0] == 1:  # zoom in
-                    # self.limit_scales[i] = 1 if self.zoom_scales[i] <= 0.4 else 0
                     self.zoom_scales[i] = self.zoom_in_scale[i] * self.zoom_scales[i] if self.zoom_in_scale[i] * self.zoom_scales[i] >= self.min_scale else self.zoom_scales[i]
                     zoom_state = raw_state[int(self.resolution[1]*(1-self.zoom_scales[i])/2): (self.resolution[1] -
                             int(self.resolution[1]*(1-self.zoom_scales[i])/2)), int(self.resolution[0]*(1-self.zoom_scales[i])/2): (self.resolution[0] -
@@ -223,7 +214,6 @@ class UnrealCvMC(gym.Env):
 
                     state = cv2.resize(zoom_state, self.resolution)
                 elif actions2cam[i][0] == -1: # zoom out
-                    # self.limit_scales[i] = 1 if self.zoom_scales[i] >= 1 else 0
                     self.zoom_scales[i] = self.zoom_out_scale[i] * self.zoom_scales[i] if self.zoom_out_scale[i] * self.zoom_scales[i] <= 1 else self.zoom_scales[i]
                     zoom_state = raw_state[int(self.resolution[1] * (1 - self.zoom_scales[i]) / 2): (self.resolution[1] - int(self.resolution[1] * (1 - self.zoom_scales[i]) / 2)),
                                  int(self.resolution[0] * (1 - self.zoom_scales[i]) / 2): (self.resolution[0] -int(self.resolution[0] * (1 - self.zoom_scales[i]) / 2)),:]
@@ -256,38 +246,24 @@ class UnrealCvMC(gym.Env):
         self.count_steps += 1
 
         rewards = []
-        gt_locations = []
-
         expected_scales = []
-        hori_rewards = []
-        verti_rewards = []
         cal_target_observed = np.zeros(len(self.cam_id))
-        self.target_observed = np.zeros(len(self.cam_id))
 
         # get reward
         for i in range(len(self.cam_id)):
             # get relative location and reward
             direction = self.get_direction(self.cam_pose[i], self.target_pos[0])
-            hori_reward = 1 - 2*abs(direction) / 45.0
-
             verti_direction = self.get_verti_direction(self.cam_pose[i], self.target_pos[0])
-            verti_reward = 1 - 2*abs(verti_direction) / 30.0
-
-            hori_rewards.append(hori_reward)
-            verti_rewards.append(verti_reward)
-
             d = self.unrealcv.get_distance(self.cam_pose[i], self.target_pos[0], 3)
-            gt_locations.append([direction, verti_direction, d])
-
             expected_scale = self.scale_function(d)
             expected_scale = expected_scale if expected_scale >= self.min_scale else self.min_scale
             expected_scale = expected_scale if expected_scale <= 1 else 1
             zoom_error = abs(self.zoom_scales[i] - expected_scale) / (1 - self.min_scale)
             zoom_reward = 1 - zoom_error
             expected_scales.append(expected_scale)
-            pose_reward = max(2 - abs(direction) / 45.0 - abs(verti_direction) / 30.0, -2) / 2
+            pose_reward = max(2 - abs(direction) / self.yaw_max - abs(verti_direction) / self.pitch_max, -2) / 2
 
-            if abs(direction) <= 45.0 * self.zoom_scales[i] and abs(verti_direction) <= 30.0 * self.zoom_scales[i]:
+            if abs(direction) <= self.yaw_max * self.zoom_scales[i] and abs(verti_direction) <= self.pitch_max * self.zoom_scales[i]:
                 cal_target_observed[i] = 1
                 sparse_reward = pose_reward + zoom_reward if self.gate_ids[i] != 0 else 0
             else:
@@ -313,6 +289,7 @@ class UnrealCvMC(gym.Env):
 
         info['states'] = self.states
         info['gate ids'] = self.gate_ids
+        info['camera poses'] = self.current_cam_pos
         info['Reward'] = rewards
         info['Success rate'] = sum(cal_target_observed) / self.num_cam
         info['Success ids'] = cal_target_observed
@@ -325,12 +302,10 @@ class UnrealCvMC(gym.Env):
     def reset(self, ):
 
         self.zoom_scales = np.ones(self.num_cam)
-
         self.zoom_in_scale = np.ones(self.num_cam) * 0.9
         self.zoom_out_scale = np.ones(self.num_cam) * 1.1
         self.stand_d = 500
         self.min_scale = 0.3
-        self.limit_scales = np.zeros(self.num_cam)
 
         self.C_reward = 0
         self.count_close = 0
@@ -400,7 +375,6 @@ class UnrealCvMC(gym.Env):
         states = []
         self.cam_pose = []
         self.fixed_cam = True if self.test else False
-        self.gt_actions = []
         self.gate_ids = []
 
         for i, cam in enumerate(self.cam_id):
@@ -446,10 +420,11 @@ class UnrealCvMC(gym.Env):
                 self.random_agents[i].reset()
         if 'Internal' in self.nav:
             self.unrealcv.set_speed(self.target_list[0], np.random.randint(30, 200))
+
         self.states = states
         self.current_states = self.states
-        self.current_cam_pos = self.cam_pose.copy()
-        self.current_target_pos = self.target_pos.copy()
+        self.current_cam_pos = self.cam_pose
+        self.current_target_pos = self.target_pos
 
         return self.states
 
@@ -480,10 +455,12 @@ class UnrealCvMC(gym.Env):
             angle_now += 360
         return angle_now
 
-    def get_angle(self, current_pose, target_pose):
-        y_delt = target_pose[1] - current_pose[1]
-        x_delt = target_pose[0] - current_pose[0]
-        angle_now = np.arctan2(y_delt, x_delt) / np.pi * 180
+    def get_verti_direction(self, current_pose, target_pose):
+        person_height = target_pose[2]
+        plane_distance = self.get_2d_distance(current_pose, target_pose)
+        height = current_pose[2] - person_height
+        angle = np.arctan2(height, plane_distance) / np.pi * 180
+        angle_now = angle + current_pose[-1]
         return angle_now
 
     def get_2d_distance(self, current_pose, target_pose):
@@ -498,15 +475,6 @@ class UnrealCvMC(gym.Env):
         z_delt = target_pose[2] - current_pose[2]
         d = np.sqrt(y_delt * y_delt + x_delt * x_delt + z_delt * z_delt)
         return d
-
-    def get_verti_direction(self, current_pose, target_pose):
-        # person_mid_height = target_pose[2] / 2
-        person_height = target_pose[2]
-        plane_distance = self.get_2d_distance(current_pose, target_pose)
-        height = current_pose[2] - person_height
-        angle = np.arctan2(height, plane_distance) / np.pi * 180
-        angle_now = angle + current_pose[-1]
-        return angle_now
 
     def load_env_setting(self, filename):
         gym_path = os.path.dirname(gym_unrealcv.__file__)
