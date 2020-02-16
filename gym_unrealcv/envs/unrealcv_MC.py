@@ -182,32 +182,7 @@ class UnrealCvMC(gym.Env):
         self.mask_bboxs = []
         self.target_masks = []
         self.zoom_masks = []
-        areas = []
         bboxs = []
-
-        for i in range(self.num_cam):
-            if self.test:
-                object_mask = self.unrealcv.read_image(self.cam_id[i], 'object_mask', 'fast')
-
-                zoom_mask = object_mask[int(self.resolution[1] * (1 - self.zoom_scales[i]) / 2): (
-                        self.resolution[1] - int(self.resolution[1] * (1 - self.zoom_scales[i]) / 2)),
-                            int(self.resolution[0] * (1 - self.zoom_scales[i]) / 2): (self.resolution[0] - int(
-                                self.resolution[0] * (1 - self.zoom_scales[i]) / 2)), :]
-                zoom_mask = cv2.resize(zoom_mask, self.resolution)
-                bbox, target_mask = self.unrealcv.get_bboxes(zoom_mask, self.target_list)
-                bboxs.append(bbox)
-
-                self.mask_bboxs.append(bbox)
-                w = self.resolution[0] * (bbox[0][1][0] - bbox[0][0][0])
-                h = self.resolution[1] * (bbox[0][1][1] - bbox[0][0][1])
-                area = w * h
-                areas.append(area)
-                self.target_masks.append(object_mask)
-
-                sparse_reward = 0 if area <= self.max_mask_area[i] else 1
-            else:
-                sparse_reward = 0
-            self.gate_rewards.append(sparse_reward)
 
         actions = np.squeeze(actions)
         actions2cam = []
@@ -221,7 +196,6 @@ class UnrealCvMC(gym.Env):
         for i in range(len(self.target_list)):
             if 'Random' in self.nav:
                 if self.action_type == 'Discrete':
-                    # actions2target.append(self.discrete_actions_player[self.random_agents[i].act()])
                     actions2target.append(self.random_agents[i].act())
                 else:
                     actions2target.append(self.random_agents[i].act())
@@ -233,7 +207,7 @@ class UnrealCvMC(gym.Env):
 
         states = []
         zoom_masks = []
-        self.mask_gt_ids = []
+        self.gate_ids = []
         areas = []
         zoom_bboxs = []
         self.gt_actions = []
@@ -242,7 +216,6 @@ class UnrealCvMC(gym.Env):
 
         for i, cam in enumerate(self.cam_id):
             cam_rot = self.unrealcv.get_rotation(cam, 'hard')
-            cam_loc = self.cam_pose[i][:3]
 
             if len(actions2cam[i]) == 2:
                 cam_rot[1] += actions2cam[i][0] * self.zoom_scales[i]
@@ -282,25 +255,24 @@ class UnrealCvMC(gym.Env):
                                  int(self.resolution[0] * (1 - self.zoom_scales[i]) / 2): (self.resolution[0] - int(self.resolution[0] * (1 - self.zoom_scales[i]) / 2)),:]
                     state = cv2.resize(zoom_state, self.resolution)
 
-            if  not self.test:
-                object_mask = self.unrealcv.read_image(self.cam_id[i], 'object_mask', 'fast')
-                zoom_mask = object_mask[int(self.resolution[1] * (1 - self.zoom_scales[i]) / 2): (
-                        self.resolution[1] - int(self.resolution[1] * (1 - self.zoom_scales[i]) / 2)),
-                            int(self.resolution[0] * (1 - self.zoom_scales[i]) / 2): (self.resolution[0] - int(
-                                self.resolution[0] * (1 - self.zoom_scales[i]) / 2)), :]
-                zoom_mask = cv2.resize(zoom_mask, self.resolution)
-                bbox, _ = self.unrealcv.get_bboxes(zoom_mask, self.target_list)
-                zoom_bboxs.append(bbox[0])
-                zoom_masks.append(zoom_mask)
-                w = self.resolution[0] * (bbox[0][1][0] - bbox[0][0][0])
-                h = self.resolution[1] * (bbox[0][1][1] - bbox[0][0][1])
-                area = w * h
-                areas.append(area)
+            object_mask = self.unrealcv.read_image(self.cam_id[i], 'object_mask', 'fast')
+            zoom_mask = object_mask[int(self.resolution[1] * (1 - self.zoom_scales[i]) / 2): (
+                    self.resolution[1] - int(self.resolution[1] * (1 - self.zoom_scales[i]) / 2)),
+                        int(self.resolution[0] * (1 - self.zoom_scales[i]) / 2): (self.resolution[0] - int(
+                            self.resolution[0] * (1 - self.zoom_scales[i]) / 2)), :]
+            zoom_mask = cv2.resize(zoom_mask, self.resolution)
+            bbox, _ = self.unrealcv.get_bboxes(zoom_mask, self.target_list)
+            zoom_bboxs.append(bbox[0])
+            zoom_masks.append(zoom_mask)
+            w = self.resolution[0] * (bbox[0][1][0] - bbox[0][0][0])
+            h = self.resolution[1] * (bbox[0][1][1] - bbox[0][0][1])
+            area = w * h
+            areas.append(area)
 
-                if area <= self.max_mask_area[i]:
-                    self.mask_gt_ids.append(0)
-                else:
-                    self.mask_gt_ids.append(1)
+            if area <= self.max_mask_area[i]:
+                self.gate_ids.append(0)
+            else:
+                self.gate_ids.append(1)
 
             states.append(state)
             self.unrealcv.set_rotation(cam, cam_rot)
@@ -309,7 +281,7 @@ class UnrealCvMC(gym.Env):
 
         self.count_steps += 1
 
-        obj_masks = []
+
         cam_ws = []
         cam_hs = []
 
@@ -327,18 +299,8 @@ class UnrealCvMC(gym.Env):
         cal_target_observed = np.zeros(len(self.cam_id))
         self.target_observed = np.zeros(len(self.cam_id))
 
-        # get bbox and reward
+        # get reward
         for i in range(len(self.cam_id)):
-            # get bbox
-            if self.reset_type >= 6:
-                object_mask = self.unrealcv.read_image(self.cam_id[i], 'object_mask', 'fast')
-                bbox, _ = self.unrealcv.get_bboxes(object_mask, self.target_list)
-                # get bbox size
-                bbox_shape = np.array(bbox[0][1]) - np.array(bbox[0][0])
-                if bbox_shape[0] * bbox_shape[1] < 0.01:
-                    self.target_observed[i] = 1
-                obj_masks.append(object_mask)
-
             # get relative location and reward
             direction = self.get_direction(self.cam_pose[i], self.target_pos[0])
             hori_reward = 1 - 2*abs(direction) / 45.0
@@ -350,7 +312,6 @@ class UnrealCvMC(gym.Env):
             verti_rewards.append(verti_reward)
 
             d = self.unrealcv.get_distance(self.cam_pose[i], self.target_pos[0], 3)
-
             gt_locations.append([direction, verti_direction, d])
 
             expected_scale = self.scale_function(d)
@@ -363,16 +324,14 @@ class UnrealCvMC(gym.Env):
 
             if abs(direction) <= 45.0 * self.zoom_scales[i] and abs(verti_direction) <= 30.0 * self.zoom_scales[i]:
                 cal_target_observed[i] = 1
-                if not self.test:
-                    sparse_reward = pose_reward + zoom_reward if self.mask_gt_ids[i] != 0 else 0
+                sparse_reward = pose_reward + zoom_reward if self.gate_ids[i] != 0 else 0
             else:
                 sparse_reward = -1
 
-            reward = sparse_reward if not self.test else pose_reward
+            reward = sparse_reward
             pose_rewards.append(pose_reward)
             rewards.append(reward)
             zoom_rewards.append(zoom_reward)
-            # zoom_exist_rewards.append(zoom_exist_reward)
             hori_rewards.append(hori_reward)
             verti_rewards.append(verti_reward)
             directions.append(direction)
@@ -382,7 +341,6 @@ class UnrealCvMC(gym.Env):
         info['zoom masks'] = zoom_masks
         info['zoom bboxs'] = zoom_bboxs
         info['states'] = self.states
-        info['mask gt ids'] = self.mask_gt_ids
 
         info['Distance'] = distances
         info['zoom reward'] = zoom_rewards
@@ -405,8 +363,7 @@ class UnrealCvMC(gym.Env):
         info['bboxs'] = bboxs
 
         info['zoom scale'] = self.zoom_scales
-        # info['gate_gt_ids'] = self.gate_gt_ids
-        info['gate rewards'] = self.gate_rewards
+        info['gate ids'] = self.gate_ids
 
         if self.count_steps > self.max_steps:
             info['Done'] = True
@@ -512,92 +469,46 @@ class UnrealCvMC(gym.Env):
 
         states = []
         self.cam_pose = []
-        self.fixed_cam = True if self.test  else False
+        self.fixed_cam = True if self.test else False
         self.gt_actions = []
-        self.gate_rewards = []
-        self.mask_gt_ids = []
+        self.gate_ids = []
 
-        if self.reset_type >= 5:
-            for i, cam in enumerate(self.cam_id):
-                if self.fixed_cam:
-                    cam_loc = self.camera_loc[i]
-                else:
-                    cam_loc = [np.random.randint(self.cam_area[i][0], self.cam_area[i][1]),
-                               np.random.randint(self.cam_area[i][2], self.cam_area[i][3]),
-                               np.random.randint(self.cam_area[i][4], self.cam_area[i][5])]
+        for i, cam in enumerate(self.cam_id):
+            if self.fixed_cam:
+                cam_loc = self.camera_loc[i]
+            else:
+                cam_loc = [np.random.randint(self.cam_area[i][0], self.cam_area[i][1]),
+                           np.random.randint(self.cam_area[i][2], self.cam_area[i][3]),
+                           np.random.randint(self.cam_area[i][4], self.cam_area[i][5])]
 
-                self.unrealcv.set_location(cam, cam_loc)
-                cam_rot = self.unrealcv.get_rotation(cam, 'hard')
-                angle_h = self.get_direction(cam_loc+cam_rot, self.target_pos[0])
-                angle_v = self.get_verti_direction(cam_loc+cam_rot, self.target_pos[0])
-                cam_rot[1] += angle_h
-                cam_rot[2] -= angle_v
+            self.unrealcv.set_location(cam, cam_loc)
+            cam_rot = self.unrealcv.get_rotation(cam, 'hard')
+            angle_h = self.get_direction(cam_loc+cam_rot, self.target_pos[0])
+            angle_v = self.get_verti_direction(cam_loc+cam_rot, self.target_pos[0])
+            cam_rot[1] += angle_h
+            cam_rot[2] -= angle_v
 
+            self.unrealcv.set_rotation(cam, cam_rot)
+            self.cam_pose.append(cam_loc + cam_rot)
 
-                self.unrealcv.set_rotation(cam, cam_rot)
-                self.cam_pose.append(cam_loc + cam_rot)
+            raw_state = self.unrealcv.get_observation(cam, self.observation_type, 'fast')
 
-                raw_state = self.unrealcv.get_observation(cam, self.observation_type, 'fast')
+            object_mask = self.unrealcv.read_image(self.cam_id[i], 'object_mask', 'fast')
+            zoom_mask = object_mask[int(self.resolution[1] * (1 - self.zoom_scales[i]) / 2): (
+                    self.resolution[1] - int(self.resolution[1] * (1 - self.zoom_scales[i]) / 2)),
+                        int(self.resolution[0] * (1 - self.zoom_scales[i]) / 2): (self.resolution[0] - int(
+                            self.resolution[0] * (1 - self.zoom_scales[i]) / 2)), :]
+            zoom_mask = cv2.resize(zoom_mask, self.resolution)
+            bbox, _ = self.unrealcv.get_bboxes(zoom_mask, self.target_list)
+            w = self.resolution[0] * (bbox[0][1][0] - bbox[0][0][0])
+            h = self.resolution[1] * (bbox[0][1][1] - bbox[0][0][1])
+            area = w * h
 
-                object_mask = self.unrealcv.read_image(self.cam_id[i], 'object_mask', 'fast')
-                zoom_mask = object_mask[int(self.resolution[1] * (1 - self.zoom_scales[i]) / 2): (
-                        self.resolution[1] - int(self.resolution[1] * (1 - self.zoom_scales[i]) / 2)),
-                            int(self.resolution[0] * (1 - self.zoom_scales[i]) / 2): (self.resolution[0] - int(
-                                self.resolution[0] * (1 - self.zoom_scales[i]) / 2)), :]
-                zoom_mask = cv2.resize(zoom_mask, self.resolution)
-                bbox, _ = self.unrealcv.get_bboxes(zoom_mask, self.target_list)
-                w = self.resolution[0] * (bbox[0][1][0] - bbox[0][0][0])
-                h = self.resolution[1] * (bbox[0][1][1] - bbox[0][0][1])
-                area = w * h
-
-                if area <= self.max_mask_area[i] * self.zoom_scales[i]:
-                    self.mask_gt_ids.append(0)
-                else:
-                    self.mask_gt_ids.append(1)
-
-                states.append(raw_state)
-                sparse_reward = 0 if area <= self.max_mask_area[i] else 1
-                self.gate_rewards.append(sparse_reward)
-
-        else:
-
-            for i, cam in enumerate(self.cam_id):
-                if self.test:
-                    cam_loc = self.camera_loc[i]
-                    self.unrealcv.set_location(cam, cam_loc)
-                    cam_rot = self.unrealcv.get_rotation(cam, 'hard')
-                else:
-                    cam_loc = [np.random.randint(self.cam_area[i][0], self.cam_area[i][1]),
-                               np.random.randint(self.cam_area[i][2], self.cam_area[i][3]),
-                               np.random.randint(self.cam_area[i][4], self.cam_area[i][5])]
-                    cam_rot = self.unrealcv.get_rotation(cam, 'hard')
-
-                angle_h = self.get_direction(cam_loc + cam_rot, self.target_pos[0])
-                angle_v = self.get_verti_direction(cam_loc + cam_rot, self.target_pos[0])
-                cam_rot[1] += angle_h
-                cam_rot[2] -= angle_v
-
-                self.unrealcv.set_location(cam, cam_loc)
-                self.unrealcv.set_rotation(cam, cam_rot)
-                self.cam_pose.append(cam_loc+cam_rot)
-
-                raw_state = self.unrealcv.get_observation(cam, self.observation_type, 'fast')
-                states.append(raw_state)
-
-                object_mask = self.unrealcv.read_image(self.cam_id[i], 'object_mask', 'fast')
-                bbox, _ = self.unrealcv.get_bboxes(object_mask, self.target_list)
-                w = self.resolution[0] * (bbox[0][1][0] - bbox[0][0][0])
-                h = self.resolution[1] * (bbox[0][1][1] - bbox[0][0][1])
-                area = w * h
-
-                if area <= self.max_mask_area[i] * self.zoom_scales[i]:
-                    self.mask_gt_ids.append(0)
-                else:
-                    self.mask_gt_ids.append(1)
-
-                sparse_reward = 0 if area <= self.max_mask_area[i] else 1
-                self.gate_rewards.append(sparse_reward)
-
+            if area <= self.max_mask_area[i] * self.zoom_scales[i]:
+                self.gate_ids.append(0)
+            else:
+                self.gate_ids.append(1)
+            states.append(raw_state)
 
         self.count_steps = 0
         if 'Random' in self.nav or 'Goal' in self.nav:
