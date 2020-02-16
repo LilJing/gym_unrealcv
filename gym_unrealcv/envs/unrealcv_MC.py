@@ -31,6 +31,7 @@ class UnrealCvMC(gym.Env):
                  reset_type,
                  action_type='discrete',  # 'discrete', 'continuous'
                  observation_type='Color',  # 'color', 'depth', 'rgbd', 'Gray'
+                 reward_type='angle',  # angle
                  docker=False,
                  resolution= (320, 240),
                  nav='Random',  # Random, Goal, Internal
