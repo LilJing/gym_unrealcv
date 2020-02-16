@@ -648,11 +648,9 @@ def map_render(camera_pos, target_pos, choose_ids, target_move, camera_move, sca
     plt.imshow(img.astype(np.uint8))
 
     # get camera's view space positions
-
     visua_len = 60
     for i in range(num_cam):
         theta = abs_angles[i] + 90.0
-        # theta = -180
         dx = visua_len * math.sin(theta * math.pi / 180)
         dy = - visua_len * math.cos(theta * math.pi / 180)
         plt.arrow(camera_position[i][0], camera_position[i][1], dx, dy, width=0.1, head_width=8, head_length = 8, length_includes_head=True)
